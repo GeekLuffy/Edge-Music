@@ -1,3 +1,4 @@
+from youtubesearchpython.__future__ import VideosSearch
 import os
 import re
 import time
@@ -11,7 +12,6 @@ from typing import Dict, List, Optional, Union, Any
 from dotenv import load_dotenv
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from youtubesearchpython.__future__ import VideosSearch
 from pytgcalls import PyTgCalls
 from pytgcalls.types import AudioPiped
 from pytgcalls.types.input_stream.quality import HighQualityAudio
@@ -34,7 +34,7 @@ API_ID = os.getenv('API_ID')
 API_HASH = os.getenv('API_HASH')
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 USER_SESSION = os.getenv('USER_SESSION')
-USER_ID = int(os.getenv('USER_ID'))
+ASSISTANT_ID = int(os.getenv('ASSISTANT_ID'))
 
 class MusicBot:
     def __init__(self):
