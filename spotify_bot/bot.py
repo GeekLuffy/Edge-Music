@@ -9,13 +9,15 @@ import tempfile
 import subprocess
 import yt_dlp
 from typing import Dict, List, Optional, Union, Any
-from dotenv import load_dotenv
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pytgcalls import PyTgCalls
 from pytgcalls.types import AudioPiped
 from pytgcalls.types.input_stream.quality import HighQualityAudio
 from pytgcalls.types import AudioParameters
+
+# Import Config instead of using dotenv
+from spotify_bot.config import Config
 
 # Import our helpers and callbacks
 from spotify_bot.callbacks import register_callbacks
@@ -27,29 +29,20 @@ try:
 except ImportError:
     pass
 
-load_dotenv()
-
-# Load environment variables
-API_ID = os.getenv('API_ID')
-API_HASH = os.getenv('API_HASH')
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-USER_SESSION = os.getenv('USER_SESSION')
-ASSISTANT_ID = int(os.getenv('ASSISTANT_ID'))
-
 class MusicBot:
     def __init__(self):
         self.app = Client(
             "music_bot",
-            api_id=API_ID,
-            api_hash=API_HASH,
-            bot_token=BOT_TOKEN
+            api_id=Config.API_ID,
+            api_hash=Config.API_HASH,
+            bot_token=Config.BOT_TOKEN
         )
         
         self.user = Client(
             "user_client",
-            api_id=API_ID,
-            api_hash=API_HASH,
-            session_string=USER_SESSION
+            api_id=Config.API_ID,
+            api_hash=Config.API_HASH,
+            session_string=Config.USER_SESSION
         )
         
         self.call_manager = PyTgCalls(self.user)
