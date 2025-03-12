@@ -123,7 +123,6 @@ def register_callbacks(bot):
                 await wait_message.delete()
                 await callback_query.answer("Error skipping track")
         else:
-            await callback_query.message.reply("No songs in the queue to skip to.")
             await callback_query.answer("No songs in the queue", show_alert=True)
     
     @bot.app.on_callback_query(filters.regex(f"^{CLOSE_CB}"))
