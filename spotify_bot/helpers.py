@@ -103,12 +103,13 @@ def create_music_caption(track_info, queue=None, current_seconds=None):
     
     return caption 
 
-def get_music_control_keyboard(is_playing=True, has_queue=False):
+def get_music_control_keyboard(is_playing=True, has_queue=False, is_repeating=False):
     # Create the keyboard
     keyboard = [
         [
             InlineKeyboardButton("⏸️ Pause" if is_playing else "▶️ Resume", callback_data="playpause"),
-            InlineKeyboardButton("⏭️ Next", callback_data="next")
+            InlineKeyboardButton("⏭️ Next", callback_data="next"),
+            InlineKeyboardButton("🔂" if is_repeating else "1️⃣", callback_data="repeat")
         ],
         [
             InlineKeyboardButton("⏹️ Stop", callback_data="stop")

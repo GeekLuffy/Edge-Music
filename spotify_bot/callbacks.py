@@ -17,12 +17,14 @@ STOP_CB = "stop"
 CLOSE_CB = "close"
 NEXT_CB = "next"
 PLAYPAUSE_CB = "playpause"
+REPEAT_CB = "repeat"
 
-def get_music_control_keyboard(is_playing=True, has_queue=False):
+def get_music_control_keyboard(is_playing=True, has_queue=False, is_repeating=False):
     keyboard = [
         [
             InlineKeyboardButton("⏸️ Pause" if is_playing else "▶️ Resume", callback_data=PLAYPAUSE_CB),
-            InlineKeyboardButton("⏭️ Next", callback_data=NEXT_CB)  # Always show "Next"
+            InlineKeyboardButton("⏭️ Next", callback_data=NEXT_CB),
+            InlineKeyboardButton("🔂 Repeat" if is_repeating else "1️⃣", callback_data=REPEAT_CB)
         ],
         [
             InlineKeyboardButton("⏹️ Stop", callback_data=STOP_CB)
@@ -35,6 +37,35 @@ def register_callbacks(bot):
     """
     Register callback query handlers for the bot
     """
+    # Add the repeat callback handler
+    @bot.app.on_callback_query(filters.regex(f"^{REPEAT_CB}"))
+    async def repeat_callback(client, callback_query: CallbackQuery):
+        """Handle repeat button callback"""
+        chat_id = callback_query.message.chat.id
+        
+        # Initialize repeat states if not exists
+        if chat_id not in bot.repeat_mode:
+            bot.repeat_mode[chat_id] = False
+        if chat_id not in bot.repeat_used:
+            bot.repeat_used[chat_id] = False
+        
+        # Toggle the repeat mode
+        current_repeat = bot.repeat_mode[chat_id]
+        if current_repeat:
+            # If already repeating, disable it
+            bot.repeat_mode[chat_id] = False
+            bot.repeat_used[chat_id] = False
+            await callback_query.answer("Repeat mode disabled")
+        else:
+            # Enable repeat and mark as not used
+            bot.repeat_mode[chat_id] = True
+            bot.repeat_used[chat_id] = False
+            await callback_query.answer("Will repeat current track once")
+        
+        # Force update the control message to reflect new state
+        await bot.update_control_message(chat_id, force_update=True)
+
+    
     @bot.app.on_callback_query(filters.regex(f"^{PLAYPAUSE_CB}"))
     async def playpause_callback(client, callback_query: CallbackQuery):
         """Handle play/pause button callback"""

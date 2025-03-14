@@ -53,6 +53,8 @@ class MusicBot:
         self.group_calls = {}  # Changed to dict to store per-chat group calls
         self.active_calls = {}  # New dict to track active calls
         self.control_messages = {}  # New dict to store control messages
+        self.repeat_mode = {}  # Add this to track repeat state per chat
+        self.repeat_used = {}  # Add this to track if repeat was used
 
         # Create download directory if it doesn't exist
         self.download_dir = "downloads"
@@ -118,6 +120,28 @@ class MusicBot:
     async def process_play_request(self, message: Message, query: str, wait_message: Message = None):
         """Process a play request from a user"""
         chat_id = message.chat.id
+
+        # First check if the assistant user is in the group
+        try:
+            assistant_member = await self.user.get_chat_member(chat_id, self.user.me.id)
+            is_assistant_present = True
+        except Exception:
+            is_assistant_present = False
+
+        # If assistant is not in the group, try to add it
+        if not is_assistant_present:
+            try:
+                # Generate chat invite link
+                invite_link = await self.app.export_chat_invite_link(chat_id)
+
+                # Try to join using the assistant account
+                await self.user.join_chat(invite_link)
+                await message.reply("✅ Successfully added assistant to the group!")
+            except Exception as e:
+                await message.reply("❌ Failed to add assistant to the group. Please add it manually or make me admin to invite users.")
+                if wait_message:
+                    await wait_message.delete()
+                return
 
         # Initialize chat-specific structures if they don't exist
         if chat_id not in self.queue:
@@ -671,6 +695,35 @@ class MusicBot:
 
         print(f"Track finished in chat {chat_id}")
 
+        # Initialize repeat states if not exists
+        if chat_id not in self.repeat_mode:
+            self.repeat_mode[chat_id] = False
+        if chat_id not in self.repeat_used:
+            self.repeat_used[chat_id] = False
+
+        # Check if repeat mode is enabled and hasn't been used yet
+        if self.repeat_mode.get(chat_id, False) and not self.repeat_used.get(chat_id, True):
+            print(f"Repeating track once for chat {chat_id}")
+            if chat_id in self.current_track and self.current_track[chat_id]:
+                current_track = self.current_track[chat_id].copy()  # Make a copy to be safe
+
+                # Mark repeat as used
+                self.repeat_used[chat_id] = True
+                # Keep repeat mode enabled until used
+                print(f"Repeat mode still active, will be disabled after this repeat")
+
+                # Update the control message to show current state
+                await self.update_control_message(chat_id, force_update=True)
+
+                # Start streaming the same track again
+                await self.start_streaming(chat_id, current_track['url'], message)
+                return
+
+        # If we get here, either repeat is disabled or has been used
+        # Reset repeat states
+        self.repeat_mode[chat_id] = False
+        self.repeat_used[chat_id] = False
+
         # Check if there are more tracks in the queue
         if chat_id in self.queue and self.queue[chat_id]:
             print(f"Playing next track from queue in chat {chat_id}")
@@ -679,6 +732,7 @@ class MusicBot:
             print(f"No more tracks in queue for chat {chat_id}")
             self.current_track[chat_id] = None
             self.is_playing[chat_id] = False
+
             await self.stop_streaming(chat_id, message)
 
             # Delete the control message if it exists
@@ -705,6 +759,56 @@ class MusicBot:
             chat_id = update.chat_id
             print(f"Stream ended in chat {chat_id}")
 
+            # Check repeat mode first
+            if self.repeat_mode.get(chat_id, False) and not self.repeat_used.get(chat_id, True):
+                print(f"Repeat mode active for chat {chat_id}, repeating track")
+                if chat_id in self.current_track and self.current_track[chat_id]:
+                    current_track = self.current_track[chat_id].copy()
+
+                    # Mark repeat as used
+                    self.repeat_used[chat_id] = True
+
+                    try:
+                        # Download the audio file (it might have been cleaned up)
+                        audio_file = await self.download_audio(current_track['url'])
+                        print(f"Downloaded audio file for repeat: {audio_file}")
+
+                        # Create audio stream
+                        audio_stream = AudioPiped(
+                            audio_file,
+                            AudioParameters(
+                                bitrate=48000,
+                            ),
+                        )
+
+                        # Change the stream to repeat
+                        await self.call_manager.change_stream(
+                            chat_id,
+                            audio_stream
+                        )
+                        print(f"Successfully changed stream for repeat in chat {chat_id}")
+
+                        # Update playback status
+                        self.is_playing[chat_id] = True
+                        if not hasattr(self, 'playback_start_times'):
+                            self.playback_start_times = {}
+                        self.playback_start_times[chat_id] = time.time()
+
+                        # Create a new control message
+                        if chat_id in self.control_messages:
+                            try:
+                                # Get the original message object for reference
+                                original_message = self.control_messages[chat_id]
+                                # Create new control message
+                                await self.create_control_message(chat_id, original_message)
+                            except Exception as e:
+                                print(f"Error creating new control message for repeat: {str(e)}")
+
+                        return
+                    except Exception as e:
+                        print(f"Error repeating track: {str(e)}")
+                        # If repeat fails, continue with normal end handling
+
             # Get the current audio file path before moving to next track
             current_audio = None
             if chat_id in self.current_track and self.current_track[chat_id]:
@@ -714,6 +818,10 @@ class MusicBot:
                     current_audio = os.path.join(self.download_dir, filename)
                 except Exception as e:
                     print(f"Error getting current audio file path: {str(e)}")
+
+            # Reset repeat states since we're moving to next track
+            self.repeat_mode[chat_id] = False
+            self.repeat_used[chat_id] = False
 
             # Check if there are more tracks in the queue
             if chat_id in self.queue and self.queue[chat_id]:
@@ -753,8 +861,22 @@ class MusicBot:
                         self.playback_start_times = {}
                     self.playback_start_times[chat_id] = time.time()
 
-                    # Update the control message
-                    await self.update_control_message(chat_id)
+                    # Create a new control message
+                    if chat_id in self.control_messages:
+                        try:
+                            # Get the original message object for reference
+                            original_message = self.control_messages[chat_id]
+                            # Create new control message
+                            await self.create_control_message(chat_id, original_message)
+                        except Exception as e:
+                            print(f"Error creating new control message for next track: {str(e)}")
+                    
+                    # Send notification about the next track
+                    await self.app.send_message(
+                        chat_id,
+                        f"▶️ Now playing: {next_track['title']}"
+                    )
+
                 except Exception as e:
                     print(f"Error playing next track: {str(e)}")
                     await self.app.send_message(
@@ -1000,102 +1122,39 @@ class MusicBot:
         # Get the current track info
         track_info = self.current_track[chat_id]
 
+        # Get current position if available
+        current_seconds = None
+        if chat_id in self.playback_start_times:
+            current_seconds = int(time.time() - self.playback_start_times[chat_id])
+
         # Create the caption
-        caption = f"🎵 **Now Playing**\n\n"
-        caption += f"**Title:** {track_info.get('title', 'Unknown')}\n"
-        if 'artist' in track_info and track_info['artist']:
-            caption += f"**Artist:** {track_info.get('artist', 'Unknown')}\n"
-        if 'album' in track_info and track_info['album']:
-            caption += f"**Album:** {track_info.get('album', 'Unknown')}\n"
-        if 'duration' in track_info and track_info['duration']:
-            caption += f"**Duration:** {track_info.get('duration', 'Unknown')}\n"
+        caption = create_music_caption(
+            track_info,
+            self.queue.get(chat_id, []),
+            current_seconds
+        )
 
-        # Calculate current position
-        current_position = 0
-        if hasattr(self, 'playback_start_times') and chat_id in self.playback_start_times:
-            current_position = int(current_time - self.playback_start_times[chat_id])
-
-        # Format the current position
-        current_position_str = format_duration(current_position)
-        caption += f"**Current Position:** {current_position_str}\n"
-
-        # Add queue info
-        if chat_id in self.queue and self.queue[chat_id]:
-            caption += f"\n**Queue:** {len(self.queue[chat_id])} tracks\n"
-            # Show next 3 tracks in queue
-            for i, track in enumerate(self.queue[chat_id][:3]):
-                caption += f"{i+1}. {track.get('title', 'Unknown')} - {track.get('artist', 'Unknown')}\n"
-            if len(self.queue[chat_id]) > 3:
-                caption += f"... and {len(self.queue[chat_id]) - 3} more\n"
-
-        # Create the keyboard with controls using the helper function
-        has_queue = chat_id in self.queue and len(self.queue[chat_id]) > 0
+        # Get current states
         is_playing = self.is_playing.get(chat_id, False)
-        reply_markup = get_music_control_keyboard(is_playing=is_playing, has_queue=has_queue)
+        has_queue = bool(self.queue.get(chat_id, []))
+        is_repeating = self.repeat_mode.get(chat_id, False)
 
-        # Check if we have a control message
-        if chat_id in self.control_messages and self.control_messages[chat_id]:
-            try:
-                # Update the existing message
-                current_caption = None
-                try:
-                    current_caption = self.control_messages[chat_id].caption
-                except:
-                    pass
+        # Create keyboard with current states
+        keyboard = get_music_control_keyboard(
+            is_playing=is_playing,
+            has_queue=has_queue,
+            is_repeating=is_repeating
+        )
 
-                # Only update if the caption has changed or force update is True
-                if force_update or current_caption != caption:
-                    await self.control_messages[chat_id].edit_caption(
-                        caption=caption,
-                        reply_markup=reply_markup
-                    )
-            except Exception as e:
-                print(f"Error updating control message: {str(e)}")
-                # If we can't update, try to send a new one
-                try:
-                    # Get the thumbnail URL
-                    thumbnail_url = track_info.get('thumbnail', None)
-
-                    # Send a new message with the thumbnail
-                    if thumbnail_url:
-                        self.control_messages[chat_id] = await self.app.send_photo(
-                            chat_id=chat_id,
-                            photo=thumbnail_url,
-                            caption=caption,
-                            reply_markup=reply_markup
-                        )
-                    else:
-                        # If no thumbnail, send a text message
-                        self.control_messages[chat_id] = await self.app.send_message(
-                            chat_id=chat_id,
-                            text=caption,
-                            reply_markup=reply_markup
-                        )
-                except Exception as e2:
-                    print(f"Error sending new control message: {str(e2)}")
-        else:
-            try:
-                # Send a new control message
-                # Get the thumbnail URL
-                thumbnail_url = track_info.get('thumbnail', None)
-
-                # Send a new message with the thumbnail
-                if thumbnail_url:
-                    self.control_messages[chat_id] = await self.app.send_photo(
-                        chat_id=chat_id,
-                        photo=thumbnail_url,
-                        caption=caption,
-                        reply_markup=reply_markup
-                    )
-                else:
-                    # If no thumbnail, send a text message
-                    self.control_messages[chat_id] = await self.app.send_message(
-                        chat_id=chat_id,
-                        text=caption,
-                        reply_markup=reply_markup
-                    )
-            except Exception as e:
-                print(f"Error sending control message: {str(e)}")
+        try:
+            # Update existing message if it exists
+            if chat_id in self.control_messages:
+                await self.control_messages[chat_id].edit_text(
+                    caption,
+                    reply_markup=keyboard
+                )
+        except Exception as e:
+            print(f"Error updating control message: {str(e)}")
 
     async def create_control_message(self, chat_id, message):
 
@@ -1396,6 +1455,14 @@ class MusicBot:
 
             # If we have a current track, we can still skip it by stopping playback
             if self.current_track.get(chat_id) and (is_active or active_call):
+                # Delete the old control message if it exists
+                if chat_id in self.control_messages:
+                    try:
+                        await self.control_messages[chat_id].delete()
+                        del self.control_messages[chat_id]
+                    except Exception as e:
+                        print(f"Error deleting control message: {str(e)}")
+                    
                 await self.stop_streaming(chat_id, message)
                 await message.reply("Skipped the current track and stopped playback.")
                 return
@@ -1412,147 +1479,57 @@ class MusicBot:
 
         # Update wait message
         try:
-            await wait_message.edit_text(f"≚ Downloading audio for: {next_track['title']}")
+            await wait_message.edit_text(f"️≚ Downloading audio for: {next_track['title']}")
         except Exception as e:
             print(f"Error updating wait message: {str(e)}")
 
-        # Download the audio file
         try:
+            # Download the audio file
             audio_file = await self.download_audio(next_track['url'])
             print(f"Downloaded audio file: {audio_file}")
 
-            # Check if the audio file exists
-            if not os.path.exists(audio_file):
-                print(f"Audio file does not exist: {audio_file}")
-                # Check if file with double extension exists
-                double_ext_file = f"{audio_file}.mp3"
-                if os.path.exists(double_ext_file):
-                    print(f"Found file with double extension: {double_ext_file}")
-                    audio_file = double_ext_file
-                else:
-                    error_msg = f"Audio file not found: {audio_file}"
-                    print(error_msg)
+            # Create audio stream
+            audio_stream = AudioPiped(
+                audio_file,
+                AudioParameters(
+                    bitrate=48000,
+                ),
+            )
 
-                    # Delete wait message
-                    try:
-                        await wait_message.delete()
-                    except Exception as e:
-                        print(f"Error deleting wait message: {str(e)}")
+            # Change the stream
+            await self.call_manager.change_stream(
+                chat_id,
+                audio_stream
+            )
+            print(f"Successfully changed stream in chat {chat_id}")
 
-                    await message.reply(f"Error: {error_msg}")
-                    # Try to play the next track in the queue if there is one
-                    if self.queue[chat_id]:
-                        await message.reply("Trying to play the next track in the queue...")
-                        await self.skip_track(message)
-                    return
-        except Exception as e:
-            print(f"Error downloading audio: {str(e)}")
+            # Update playback status
+            self.is_playing[chat_id] = True
+            if not hasattr(self, 'playback_start_times'):
+                self.playback_start_times = {}
+            self.playback_start_times[chat_id] = time.time()
 
-            # Delete wait message
+            # Delete the old control message and create a new one
+            if chat_id in self.control_messages:
+                try:
+                    # Get reference to the old message before deleting it
+                    original_message = self.control_messages[chat_id]
+                    # Create new control message
+                    await self.create_control_message(chat_id, original_message)
+                except Exception as e:
+                    print(f"Error creating new control message: {str(e)}")
+
+            # Delete the wait message
             try:
                 await wait_message.delete()
             except Exception as e:
                 print(f"Error deleting wait message: {str(e)}")
 
-            await message.reply(f"Error downloading audio: {str(e)}")
-            # Try to play the next track in the queue if there is one
-            if self.queue[chat_id]:
-                await message.reply("Trying to play the next track in the queue...")
-                await self.skip_track(message)
-            return
-
-        # Update wait message
-        try:
-            await wait_message.edit_text(f"☋ Changing stream to: {next_track['title']}")
+            await message.reply(f"Skipped to: {next_track['title']}")
         except Exception as e:
-            print(f"Error updating wait message: {str(e)}")
-
-        # If we have an active group call, try to change the stream
-        if is_active or active_call:
-            print(f"Changing stream in chat {chat_id}")
-            try:
-                # Create an AudioPiped object with AudioParameters
-                audio_stream = AudioPiped(
-                    audio_file,
-                    AudioParameters(
-                        bitrate=48000,
-                    ),
-                )
-
-                # Try to change the stream using the call manager
-                try:
-                    await self.call_manager.change_stream(
-                        chat_id,
-                        audio_stream
-                    )
-                    print(f"Successfully changed stream with call_manager for chat {chat_id}")
-                except Exception as e:
-                    print(f"Error changing stream with call_manager: {str(e)}")
-
-                    # If changing stream fails, try to leave and rejoin
-                    print("Trying to leave and rejoin the group call")
-
-                    # First try to leave
-                    try:
-                        await self.call_manager.leave_group_call(chat_id)
-                        print(f"Successfully left group call for chat {chat_id}")
-                    except Exception as e:
-                        print(f"Error leaving group call: {str(e)}")
-
-                    # Wait a moment before rejoining
-                    await asyncio.sleep(2)
-
-                    # Now try to join again
-                    try:
-                        self.group_calls[chat_id] = await self.call_manager.join_group_call(
-                            chat_id,
-                            audio_stream
-                        )
-                        print(f"Successfully rejoined group call for seeking in chat {chat_id}")
-                    except Exception as e:
-                        if "Already joined into group call" in str(e):
-                            print(f"Already in group call, trying to change stream instead")
-                            # If we're already in the group call, try to change the stream
-                            try:
-                                await self.call_manager.change_stream(
-                                    chat_id,
-                                    audio_stream
-                                )
-                                print(f"Successfully changed stream for seeking in chat {chat_id}")
-                            except Exception as e2:
-                                print(f"Error changing stream: {str(e2)}")
-                                await wait_message.edit_text(f"Error seeking: {str(e2)}")
-                                return
-                        else:
-                            print(f"Error rejoining group call: {str(e)}")
-                            await wait_message.edit_text(f"Error seeking: {str(e)}")
-                            return
-
-                # Update the playback start time
-                if not hasattr(self, 'playback_start_times'):
-                    self.playback_start_times = {}
-
-                # Set the start time to now (fresh start for the new track)
-                self.playback_start_times[chat_id] = time.time()
-
-                # Force an update of the control message
-                if hasattr(self, 'last_update_times'):
-                    self.last_update_times[chat_id] = 0
-
-                # Update the control message
-                await self.update_control_message(chat_id, True)  # Force update
-
-                # Delete the wait message
-                try:
-                    await wait_message.delete()
-                except Exception as e:
-                    print(f"Error deleting wait message: {str(e)}")
-
-                await message.reply(f"Skipped to: {next_track['title']}")
-            except Exception as e:
-                print(f"Error changing stream: {str(e)}")
-                await wait_message.edit_text(f"Error skipping track: {str(e)}")
-                return
+            print(f"Error changing stream: {str(e)}")
+            await wait_message.edit_text(f"Error skipping track: {str(e)}")
+            return
 
     async def refresh_command(self, client: Client, message: Message):
         """Refresh the control message"""
