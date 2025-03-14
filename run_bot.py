@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Run script for the Telegram Music Bot
-This script helps run the bot from the project root directory
-"""
-
 import os
 import sys
 import time

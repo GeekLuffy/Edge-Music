@@ -73,36 +73,57 @@ def register_callbacks(bot):
     async def stop_callback(client, callback_query: CallbackQuery):
         """Handle stop button callback"""
         chat_id = callback_query.message.chat.id
-        user_id = callback_query.from_user.id
         
         # Get the bot instance
-        bot_instance = bot  # Use the bot parameter directly
+        bot_instance = bot
         
-        # Check if there's an active group call
-        is_active = await bot_instance.is_group_call_active(chat_id)
-        
-        if is_active or bot_instance.active_calls.get(chat_id, False) or bot_instance.is_playing.get(chat_id, False):
+        try:
             # Send a wait message
             wait_message = await callback_query.message.reply("⏹️ Stopping music... Please wait.")
             
+            # First try to pause the stream
+            try:
+                await bot_instance.call_manager.pause_stream(chat_id)
+            except Exception as e:
+                print(f"Error pausing stream: {str(e)}")
+
             # Call the stop method
-            await bot_instance.stop_streaming(chat_id)
+            success = await bot_instance.stop_streaming(chat_id)
             
+            # Try to delete the control message first
+            try:
+                if chat_id in bot_instance.control_messages:
+                    await bot_instance.control_messages[chat_id].delete()
+                    del bot_instance.control_messages[chat_id]
+            except Exception as e:
+                print(f"Error deleting control message: {str(e)}")
+
             # Delete wait message
             try:
                 await wait_message.delete()
             except Exception as e:
                 print(f"Error deleting wait message: {str(e)}")
-                
-            await callback_query.answer("Stopped the music")
             
-            # Try to delete the message with the controls
-            try:
-                await callback_query.message.delete()
-            except Exception as e:
-                print(f"Error deleting message: {str(e)}")
-        else:
-            await callback_query.answer("Nothing is playing")
+            if success:
+                # Try to delete the current message
+                try:
+                    await callback_query.message.delete()
+                except Exception as e:
+                    print(f"Error deleting callback message: {str(e)}")
+                
+                await callback_query.answer("Music stopped successfully")
+            else:
+                # Even if stop_streaming returns False, try one last time to stop the stream
+                try:
+                    await bot_instance.call_manager.stop_stream(chat_id)
+                    await bot_instance.call_manager.leave_group_call(chat_id)
+                    await callback_query.answer("Music stopped (fallback method)")
+                except Exception as e:
+                    print(f"Error in fallback stop: {str(e)}")
+                    await callback_query.answer("Failed to stop music")
+        except Exception as e:
+            print(f"Error in stop callback: {str(e)}")
+            await callback_query.answer("Error occurred while stopping music")
 
     @bot.app.on_callback_query(filters.regex(f"^{NEXT_CB}"))
     async def next_callback(client, callback_query: CallbackQuery):
