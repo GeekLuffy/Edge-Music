@@ -1636,7 +1636,7 @@ class MusicBot:
                 seek_seconds = total_seconds
 
             # Send a wait message
-            wait_message = await message.reply(f"⏩ Seeking forward by {seek_offset} seconds to position {seek_seconds}s...")
+            wait_message = await message.reply(f"➲ Seeking forward by {seek_offset} seconds to position {seek_seconds}s...")
 
             # We need to restart the stream to actually seek
             # First, get the current track URL
@@ -1764,7 +1764,7 @@ class MusicBot:
                 except Exception as e:
                     print(f"Error deleting wait message: {str(e)}")
 
-                await message.reply(f"✅ Seeked to position {seek_seconds}s")
+                await message.reply(f"☍ Seeked to position {seek_seconds}s")
             except Exception as e:
                 print(f"Error changing stream for seeking: {str(e)}")
                 await wait_message.edit_text(f"Error seeking: {str(e)}")
@@ -1781,7 +1781,7 @@ class MusicBot:
             self.current_track[chat_id]['audio_file'] = seeked_audio_file
 
             # Update wait message
-            await wait_message.edit_text(f"✅ Seeked to position {seek_seconds}s")
+            await wait_message.edit_text(f"☍ Seeked to position {seek_seconds}s")
 
             # Update the control message
             await self.update_control_message(chat_id)
