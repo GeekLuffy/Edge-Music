@@ -1335,7 +1335,7 @@ class MusicBot:
             return
 
         # Create the queue message
-        queue_text = "🎵 **Current Queue:**\n\n"
+        queue_text = "♬ **Current Queue:**\n\n"
 
         # Add the current track
         queue_text += f"**Now Playing:**\n{create_music_caption(self.current_track[chat_id])}\n\n"
@@ -1373,7 +1373,7 @@ class MusicBot:
         print(f"Skipping track in chat {chat_id}")
 
         # Send a wait message
-        wait_message = await message.reply("⏭️ Skipping to next track... Please wait.")
+        wait_message = await message.reply("➲ Skipping to next track... Please wait.")
 
         # Check if there's an active group call
         is_active = await self.is_group_call_active(chat_id)
@@ -1412,7 +1412,7 @@ class MusicBot:
 
         # Update wait message
         try:
-            await wait_message.edit_text(f"⬇️ Downloading audio for: {next_track['title']}")
+            await wait_message.edit_text(f"≚ Downloading audio for: {next_track['title']}")
         except Exception as e:
             print(f"Error updating wait message: {str(e)}")
 
@@ -1463,7 +1463,7 @@ class MusicBot:
 
         # Update wait message
         try:
-            await wait_message.edit_text(f"🔄 Changing stream to: {next_track['title']}")
+            await wait_message.edit_text(f"☋ Changing stream to: {next_track['title']}")
         except Exception as e:
             print(f"Error updating wait message: {str(e)}")
 
